@@ -1,17 +1,69 @@
 #!/usr/bin/python3
 import subprocess
 import argparse
-import sys
+import sys, os
+import threading, serial, queue, datetime
+from time import sleep
+from threading import RLock
+from collections import deque
 
 parser = argparse.ArgumentParser()
 parser.add_argument("-p", "--port", help="tcp port to count connections on", type=int, required=True)
 args = parser.parse_args()
 
 port = args.port
+tcpdump_thread_running = True
+exit_called = False
+
+def is_root():
+    return os.geteuid() == 0
+
+if not is_root():
+    print("This program requires root privileges. Exiting")
+    sys.exit(1)
 
 if not ((port > 0) and (port < 65535)):
     print("Invalid port {port}".format(port=port))
     sys.exit(1)
+
+iptables_check = ""
+try:
+    iptables_check = subprocess.check_output("""iptables -L INPUT -n | grep "netcount temporary rule" """, shell=True, text=True)
+except:
+    pass
+
+if not "netcount" in iptables_check:
+    try:
+        iptables_check = subprocess.check_output("""iptables -A INPUT -m conntrack --ctstate ESTABLISHED -j ACCEPT -m comment --comment "netcount temporary rule" """, shell=True, text=True)
+    except:
+        print("Unable to add iptables conntrack rule. Exiting")
+        sys.exit(1)
+
+print("before")    
+print(iptables_check)
+print("after")
+
+def workerTcpDumpThread(tcpdumpport):
+    while tcpdump_thread_running:
+        ## use conntrack -E -p tcp --dport 80 
+        ## check https://stackoverflow.com/questions/36476841/python-how-to-read-stdout-of-subprocess-in-a-nonblocking-way/36477512
+        sleep(0.5)
+        print("heloo")
+    print("Thread {} exiting.".format(threading.currentThread().getName()))        
+
+
+def handle_exit(*args):
+    global tcpdump_thread_running,exit_called
+    if not exit_called:
+        exit_called = True
+        tcpdump_thread_running=False
+        try:
+            iptables_check = subprocess.check_output("""iptables -D INPUT -m conntrack --ctstate ESTABLISHED -j ACCEPT -m comment --comment "netcount temporary rule" """, shell=True, text=True)
+        except:
+            print("Cleanup: Unable to delete iptables conntrack rule. Did you delete it manually ?")
+            sys.exit(1)
+        print("Exited nicely")
+
 
 def main():
     # netstat -tapn | grep ESTA | tr -s " " | cut -d " " -f 4 | grep :80 | wc -l
@@ -20,8 +72,16 @@ def main():
 
     netstat_count = subprocess.check_output("""netstat -tapn | grep ESTA | tr -s " " | cut -d " " -f 4 | grep :80 | wc -l""", shell=True, text=True)
     #netstat_count = subprocess.check_output("ls /", shell=True, text=True)
-    print("Netstat count on port {port} (instantaneous) : {ncount}".format(port=80, ncount=netstat_count))
+    print("Netstat count on port {port} (instantaneous) : {ncount}".format(port=port, ncount=netstat_count))
 
+    tcpdumpThread = threading.Thread(target=workerTcpDumpThread, args=(port,))
+    tcpdumpThread.start()
+
+    import atexit
+    atexit.register(handle_exit)
+    import signal
+    signal.signal(signal.SIGTERM, handle_exit)
+    signal.signal(signal.SIGINT, handle_exit)
 
 
 if __name__ == "__main__":
