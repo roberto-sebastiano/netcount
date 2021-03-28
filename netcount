@@ -56,11 +56,11 @@ if not iptables_path:
 
 if not conntrack_path:
     print("This program requires the conntrack program, and I can't find it.")
-
+    sys.exit(1)
 
 if not netstat_path:
     print("This program requires the netstat program, and I can't find it.")
-
+    sys.exit(1)
 
 iptables_check = ""
 try:
