@@ -64,13 +64,13 @@ if not netstat_path:
 
 iptables_check = ""
 try:
-    iptables_check = subprocess.check_output("""{iptables} -L INPUT -n | grep "netcount temporary rule" """.format(iptables=iptables_path), shell=True, text=True)
+    iptables_check = subprocess.check_output("""{iptables} -L INPUT -n | grep "netcount temporary rule" """.format(iptables=iptables_path), shell=True, universal_newlines=True)
 except:
     pass
 
 if not "netcount" in iptables_check:
     try:
-        iptables_check = subprocess.check_output("""{iptables} -A INPUT -p tcp --dport={port} -m conntrack --ctstate ESTABLISHED -j ACCEPT -m comment --comment "netcount temporary rule" """.format(iptables=iptables_path,port=port), shell=True, text=True)
+        iptables_check = subprocess.check_output("""{iptables} -A INPUT -p tcp --dport={port} -m conntrack --ctstate ESTABLISHED -j ACCEPT -m comment --comment "netcount temporary rule" """.format(iptables=iptables_path,port=port), shell=True, universal_newlines=True)
     except Exception as e:
         print(e)
         print("Unable to add iptables conntrack rule. Exiting")
@@ -128,7 +128,7 @@ def handle_exit(*args):
         tcpdump_thread_running=False
         counteravg_thread_running=False        
         try:
-            iptables_check = subprocess.check_output("""{iptables} -D INPUT -p tcp --dport={port} -m conntrack --ctstate ESTABLISHED -j ACCEPT -m comment --comment "netcount temporary rule" """.format(port=port, iptables=iptables_path), shell=True, text=True)
+            iptables_check = subprocess.check_output("""{iptables} -D INPUT -p tcp --dport={port} -m conntrack --ctstate ESTABLISHED -j ACCEPT -m comment --comment "netcount temporary rule" """.format(port=port, iptables=iptables_path), shell=True, universal_newlines=True)
         except:
             print("Cleanup: Unable to delete iptables conntrack rule. Did you delete it manually ?")
             sys.exit(1)
@@ -140,8 +140,8 @@ def main():
     # alternative command, to check if it works in a router:
     # ss -o state established '( sport = :80 )'
 
-    netstat_count = subprocess.check_output("""{netstat} -tapn | grep ESTA | tr -s " " | cut -d " " -f 4 | grep :{port} | wc -l""".format(netstat=netstat_path, port=port), shell=True, text=True)
-    #netstat_count = subprocess.check_output("ls /", shell=True, text=True)
+    netstat_count = subprocess.check_output("""{netstat} -tapn | grep ESTA | tr -s " " | cut -d " " -f 4 | grep :{port} | wc -l""".format(netstat=netstat_path, port=port), shell=True, universal_newlines=True)
+    #netstat_count = subprocess.check_output("ls /", shell=True, universal_newlines=True)
     print("Netstat count on port {port} (instantaneous) : {ncount}".format(port=port, ncount=netstat_count))
 
     tcpdumpThread = threading.Thread(target=workerTcpDumpThread, args=(port,))
