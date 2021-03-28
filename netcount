@@ -2,7 +2,7 @@
 import subprocess, select
 import argparse
 import sys, os, time
-import threading, serial, queue, datetime
+import threading, datetime
 from time import sleep
 from threading import RLock
 from collections import deque
