@@ -73,6 +73,7 @@ if not "netcount" in iptables_check:
         iptables_check = subprocess.check_output("""{iptables} -A INPUT -p tcp --dport={port} -m conntrack --ctstate ESTABLISHED -j ACCEPT -m comment --comment "netcount temporary rule" """.format(iptables=iptables_path,port=port), shell=True, text=True)
     except:
         print("Unable to add iptables conntrack rule. Exiting")
+        print("""{iptables} -A INPUT -p tcp --dport={port} -m conntrack --ctstate ESTABLISHED -j ACCEPT -m comment --comment "netcount temporary rule" """.format(iptables=iptables_path,port=port))
         sys.exit(1)
 
 def workerCounterAvgThread():
