@@ -7,6 +7,7 @@ But this command gives you the connections that you have in that precise moment.
 What if you have lots of short living connection ? You miss them from that count 
 
 Solution: ./netcount -p 80
+
 :)
 
 Netcount: A tool to counts the number of connections per second on a specific tcp port
