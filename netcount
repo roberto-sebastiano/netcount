@@ -1,7 +1,7 @@
 #!/usr/bin/python3
-import subprocess
+import subprocess, select
 import argparse
-import sys, os
+import sys, os, time
 import threading, serial, queue, datetime
 from time import sleep
 from threading import RLock
@@ -13,7 +13,27 @@ args = parser.parse_args()
 
 port = args.port
 tcpdump_thread_running = True
+counteravg_thread_running = True
 exit_called = False
+connection_counter_lock = RLock()
+connection_counter = 0
+
+def which(program):
+    import os
+    def is_exe(fpath):
+        return os.path.isfile(fpath) and os.access(fpath, os.X_OK)
+
+    fpath, fname = os.path.split(program)
+    if fpath:
+        if is_exe(program):
+            return program
+    else:
+        for path in os.environ["PATH"].split(os.pathsep):
+            exe_file = os.path.join(path, program)
+            if is_exe(exe_file):
+                return exe_file
+
+    return None
 
 def is_root():
     return os.geteuid() == 0
@@ -26,39 +46,87 @@ if not ((port > 0) and (port < 65535)):
     print("Invalid port {port}".format(port=port))
     sys.exit(1)
 
+iptables_path = which("iptables")
+conntrack_path = which("conntrack")
+netstat_path = which("netstat")
+
+if not iptables_path:
+    print("This program requires the iptables program, and I can't find it.")
+    sys.exit(1)
+
+if not conntrack_path:
+    print("This program requires the conntrack program, and I can't find it.")
+
+
+if not netstat_path:
+    print("This program requires the netstat program, and I can't find it.")
+
+
 iptables_check = ""
 try:
-    iptables_check = subprocess.check_output("""iptables -L INPUT -n | grep "netcount temporary rule" """, shell=True, text=True)
+    iptables_check = subprocess.check_output("""{iptables} -L INPUT -n | grep "netcount temporary rule" """.format(iptables=iptables_path), shell=True, text=True)
 except:
     pass
 
 if not "netcount" in iptables_check:
     try:
-        iptables_check = subprocess.check_output("""iptables -A INPUT -m conntrack --ctstate ESTABLISHED -j ACCEPT -m comment --comment "netcount temporary rule" """, shell=True, text=True)
+        iptables_check = subprocess.check_output("""{iptables} -A INPUT -p tcp --dport={port} -m conntrack --ctstate ESTABLISHED -j ACCEPT -m comment --comment "netcount temporary rule" """.format(iptables=iptables_path,port=port), shell=True, text=True)
     except:
         print("Unable to add iptables conntrack rule. Exiting")
         sys.exit(1)
 
-print("before")    
-print(iptables_check)
-print("after")
+def workerCounterAvgThread():
+    #global connection_counter, connection_counter_lock
+    start = time.perf_counter()
+    conn_per_sec = 0
+    connection_counter_old = 0
+    while counteravg_thread_running:
+        duration = time.perf_counter() - start
+        if (duration > 1.0):
+            with connection_counter_lock:
+                conn_per_sec = connection_counter - connection_counter_old
+                connection_counter_old = connection_counter
+                print("Total ESTABLISHED connections on port {port}: {totconn}, per second now: {avgconn}".format(port=port, totconn=connection_counter, avgconn=conn_per_sec))
+                #print(duration)
+            start = time.perf_counter()
+        sleep(0.01)
+    print("Thread {} exiting.".format(threading.currentThread().getName()))                
 
 def workerTcpDumpThread(tcpdumpport):
+    global connection_counter
+
+    ## use conntrack -E -p tcp --dport 80 
+    ## check https://stackoverflow.com/questions/36476841/python-how-to-read-stdout-of-subprocess-in-a-nonblocking-way/36477512
+    ## or https://stackoverflow.com/questions/883152/is-there-a-way-to-poll-a-file-handle-returned-from-subprocess-popen
+    #sleep(0.5)
+    conntrack_process=subprocess.Popen([conntrack_path,'-b','2129920','-E',"-p", "tcp","--dport", "80"],stdout=subprocess.PIPE)
+    #print("heloo")
+    y=select.poll()
+    y.register(conntrack_process.stdout,select.POLLIN)
+
     while tcpdump_thread_running:
-        ## use conntrack -E -p tcp --dport 80 
-        ## check https://stackoverflow.com/questions/36476841/python-how-to-read-stdout-of-subprocess-in-a-nonblocking-way/36477512
-        sleep(0.5)
-        print("heloo")
+        conntrack_string = ""
+        if y.poll(1):
+            conntrack_string = conntrack_process.stdout.readline()
+        else:
+            #print("nothing here")
+            sleep(0.01)
+        if (len(conntrack_string) > 1) and b"ESTABLISHED" in conntrack_string and b"ASSURED" in conntrack_string:
+            #print("NEW CONNECTION")
+            with connection_counter_lock:
+                connection_counter += 1
+    conntrack_process.terminate()
     print("Thread {} exiting.".format(threading.currentThread().getName()))        
 
 
 def handle_exit(*args):
-    global tcpdump_thread_running,exit_called
+    global tcpdump_thread_running,counteravg_thread_running,exit_called
     if not exit_called:
         exit_called = True
         tcpdump_thread_running=False
+        counteravg_thread_running=False        
         try:
-            iptables_check = subprocess.check_output("""iptables -D INPUT -m conntrack --ctstate ESTABLISHED -j ACCEPT -m comment --comment "netcount temporary rule" """, shell=True, text=True)
+            iptables_check = subprocess.check_output("""{iptables} -D INPUT -p tcp --dport={port} -m conntrack --ctstate ESTABLISHED -j ACCEPT -m comment --comment "netcount temporary rule" """.format(port=port, iptables=iptables_path), shell=True, text=True)
         except:
             print("Cleanup: Unable to delete iptables conntrack rule. Did you delete it manually ?")
             sys.exit(1)
@@ -70,13 +138,15 @@ def main():
     # alternative command, to check if it works in a router:
     # ss -o state established '( sport = :80 )'
 
-    netstat_count = subprocess.check_output("""netstat -tapn | grep ESTA | tr -s " " | cut -d " " -f 4 | grep :80 | wc -l""", shell=True, text=True)
+    netstat_count = subprocess.check_output("""{netstat} -tapn | grep ESTA | tr -s " " | cut -d " " -f 4 | grep :80 | wc -l""".format(netstat=netstat_path), shell=True, text=True)
     #netstat_count = subprocess.check_output("ls /", shell=True, text=True)
     print("Netstat count on port {port} (instantaneous) : {ncount}".format(port=port, ncount=netstat_count))
 
     tcpdumpThread = threading.Thread(target=workerTcpDumpThread, args=(port,))
     tcpdumpThread.start()
-
+    workerCounterThread = threading.Thread(target=workerCounterAvgThread)
+    workerCounterThread.start()    
+    
     import atexit
     atexit.register(handle_exit)
     import signal
