@@ -138,7 +138,7 @@ def main():
     # alternative command, to check if it works in a router:
     # ss -o state established '( sport = :80 )'
 
-    netstat_count = subprocess.check_output("""{netstat} -tapn | grep ESTA | tr -s " " | cut -d " " -f 4 | grep :80 | wc -l""".format(netstat=netstat_path), shell=True, text=True)
+    netstat_count = subprocess.check_output("""{netstat} -tapn | grep ESTA | tr -s " " | cut -d " " -f 4 | grep :{port} | wc -l""".format(netstat=netstat_path, port=port), shell=True, text=True)
     #netstat_count = subprocess.check_output("ls /", shell=True, text=True)
     print("Netstat count on port {port} (instantaneous) : {ncount}".format(port=port, ncount=netstat_count))
 
